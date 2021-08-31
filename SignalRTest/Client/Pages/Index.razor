@@ -1,5 +1,7 @@
 ﻿@page "/"
+@using Microsoft.AspNetCore.Http.Connections
 @using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.Extensions.Logging.Console
 @inject NavigationManager NavigationManager
 @implements IAsyncDisposable
 
@@ -27,17 +29,33 @@
 </ul>
 
 @code {
+
     private HubConnection hubConnection;
     private List<string> messages = new List<string>();
     private string userInput = "";
     private string messageInput="";
+    public bool IsConnected = false;
 
     protected override async Task OnInitializedAsync()
     {
-        await Task.Delay(5000);
+        //await Task.Delay(5000);
+        //hubConnection = new HubConnectionBuilder()
+        //    .WithUrl(NavigationManager.ToAbsoluteUri("/chathub"))
+        //    .Build();
+
+        //applied the additional changes as mentioned here
+        //https://docs.microsoft.com/en-us/aspnet/core/blazor/fundamentals/signalr?view=aspnetcore-5.0&pivots=webassembly
         hubConnection = new HubConnectionBuilder()
-            .WithUrl(NavigationManager.ToAbsoluteUri("/chathub"))
-            .Build();
+            .WithUrl(new Uri(NavigationManager.ToAbsoluteUri("/chathub").ToString()), options =>
+            {
+                options.HttpMessageHandlerFactory = innerHandler => 
+                    new IncludeRequestCredentialsMessageHandler { InnerHandler = innerHandler };
+                options.Transports = (HttpTransportType.WebSockets | HttpTransportType.LongPolling);
+                //options.Transports = HttpTransportType.WebSockets;
+                options.Headers["Foo"] = "Bar";
+            }).
+            Build();
+
 
         hubConnection.On<string, string>("ReceiveMessage", (user, message) =>
         {
@@ -46,14 +64,22 @@
             StateHasChanged();
         });
 
+       
         await hubConnection.StartAsync();
+
+        if (hubConnection.State == HubConnectionState.Connected)
+            IsConnected = true;
     }
 
-    async Task Send() =>
-        await hubConnection.SendAsync("SendMessage", userInput, messageInput);
+    async Task Send()
+    {
+         await hubConnection.SendAsync("SendMessage", userInput, messageInput);
+    }
+    //async Task Send() =>
+    //    await hubConnection.SendAsync("SendMessage", userInput, messageInput);
 
-    public bool IsConnected =>
-        hubConnection.State == HubConnectionState.Connected;
+    //public bool IsConnected =>
+    //    hubConnection.State == HubConnectionState.Connected;
 
     public async ValueTask DisposeAsync()
     {
