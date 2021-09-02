@@ -21,6 +21,16 @@
 
 <hr>
 
+@if (IsConnected)
+{
+    <span> Connected</span>
+}
+else
+{
+    <spa>Disconnected</spa> 
+}
+
+
 <ul id="messagesList">
     @foreach (var message in messages)
     {
@@ -45,18 +55,21 @@
 
         //applied the additional changes as mentioned here
         //https://docs.microsoft.com/en-us/aspnet/core/blazor/fundamentals/signalr?view=aspnetcore-5.0&pivots=webassembly
+        //https://docs.microsoft.com/en-us/aspnet/signalr/overview/guide-to-the-api/handling-connection-lifetime-events
+        //https://docs.microsoft.com/en-us/aspnet/core/signalr/configuration?view=aspnetcore-5.0&tabs=dotnet#configure-additional-options
         hubConnection = new HubConnectionBuilder()
+            .WithAutomaticReconnect() //https://docs.microsoft.com/en-us/aspnet/core/signalr/dotnet-client?view=aspnetcore-5.0&tabs=visual-studio#automatically-reconnect
             .WithUrl(new Uri(NavigationManager.ToAbsoluteUri("/chathub").ToString()), options =>
             {
-                options.HttpMessageHandlerFactory = innerHandler => 
+                options.HttpMessageHandlerFactory = innerHandler =>
                     new IncludeRequestCredentialsMessageHandler { InnerHandler = innerHandler };
                 options.Transports = (HttpTransportType.WebSockets | HttpTransportType.LongPolling);
                 //options.Transports = HttpTransportType.WebSockets;
                 options.Headers["Foo"] = "Bar";
             }).
-            Build();
+           Build();
 
-
+        hubConnection.ServerTimeout = TimeSpan.FromHours(24);
         hubConnection.On<string, string>("ReceiveMessage", (user, message) =>
         {
             var encodedMsg = $"{user}: {message}";
@@ -64,7 +77,83 @@
             StateHasChanged();
         });
 
-       
+
+        hubConnection.Closed += error =>
+        {
+            if(hubConnection.State == HubConnectionState.Disconnected)
+            {
+                 Console.ForegroundColor = ConsoleColor.Red;
+                Console.Error.WriteLine("XXXXX-Connection problems.");
+                Console.ResetColor();
+                Console.WriteLine(error.Message);
+                StateHasChanged();
+            }
+
+            // Notify users the connection has been closed or manually try to restart the connection.
+
+            return Task.CompletedTask;
+        };
+
+        //hubConnection.Closed = OnDisconnected;
+        hubConnection.Closed += async (s) =>
+        {
+            IsConnected = false;
+           
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Error.WriteLine("Connection problems.");
+            Console.ResetColor();
+            Console.WriteLine(s.Message);
+            StateHasChanged();
+        };
+
+        hubConnection.Reconnecting += error =>
+        {
+           if(hubConnection.State == HubConnectionState.Reconnecting)
+            {
+                 Console.ForegroundColor = ConsoleColor.Red;
+                 Console.Error.WriteLine("XXXXX-Retrying...");
+                Console.ResetColor();
+            }
+
+            // Notify users the connection was lost and the client is reconnecting.
+            // Start queuing or dropping messages.
+
+            return Task.CompletedTask;
+        };
+
+        hubConnection.Reconnecting += async (s) =>
+        {
+          
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Error.WriteLine("Retrying...");
+            Console.ResetColor();
+        };
+
+        hubConnection.Reconnected += connectionId =>
+        {
+           if( hubConnection.State == HubConnectionState.Connected)
+            {
+            
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("XXXXXX-Connection success...");
+            Console.ResetColor();
+  
+            }
+
+            // Notify users the connection was reestablished.
+            // Start dequeuing messages queued while reconnecting if any.
+
+            return Task.CompletedTask;
+        };
+
+        hubConnection.Reconnected += async (s) =>
+        {
+          
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Connection success...");
+            Console.ResetColor();
+        };
+
         await hubConnection.StartAsync();
 
         if (hubConnection.State == HubConnectionState.Connected)
@@ -85,7 +174,13 @@
     {
         if (hubConnection is not null)
         {
+            //If oyu have multiple listner ar client side and only wnats to close
+                //one of them use the below method
+            // hubConnection.Remove("ReceiveMessage");
+            
             await hubConnection.DisposeAsync();
         }
     }
+
+        
 }
